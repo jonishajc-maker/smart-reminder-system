@@ -1,187 +1,160 @@
-# -----------------------------
-# SMART REMINDER SYSTEM (FINAL VERSION WITHOUT spaCy)
-# Streamlit UI + User Control + Keyword-based Date Parsing
-# -----------------------------
-
 import streamlit as st
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil import parser as dateparser
 from sklearn.tree import DecisionTreeClassifier
+import spacy
 
-# -----------------------------
-# Database
-# -----------------------------
+# ── NLP model ──────────────────────────────────────────────
+@st.cache_resource
+def load_nlp():
+    return spacy.load("en_core_web_sm")
+
+nlp = load_nlp()
+
+# ── ML priority model ──────────────────────────────────────
+CATEGORIES = {"assignment": 0, "work": 1, "event": 2, "other": 3}
+X = [[2,0],[6,0],[12,0],[48,1],[72,1],[2,2],[80,2],[3,3],[100,3]]
+y = [1,1,1,0,0,1,0,1,0]
+clf = DecisionTreeClassifier(max_depth=3)
+clf.fit(X, y)
+
+def predict_priority(due_date, category):
+    if not due_date:
+        return "Optional"
+    hours = (due_date - datetime.now()).total_seconds() / 3600
+    cat_id = CATEGORIES.get(category, 3)
+    return "Critical" if clf.predict([[hours, cat_id]])[0] == 1 else "Optional"
+
+# ── NLP date + task extraction ─────────────────────────────
+def extract_reminder(text):
+    doc = nlp(text)
+    date_ents = [e.text for e in doc.ents if e.label_ in ("DATE", "TIME")]
+    task = text
+    for ent in date_ents:
+        task = task.replace(ent, "").strip(" ,")
+    due = None
+    if date_ents:
+        try:
+            due = dateparser.parse(" ".join(date_ents), default=datetime.now())
+        except:
+            pass
+    return task or text, due
+
+# ── Database ───────────────────────────────────────────────
 conn = sqlite3.connect("reminders.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS reminders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task TEXT,
-    due_date TEXT,
-    category TEXT,
-    priority TEXT,
-    done INTEGER DEFAULT 0
-)
+cur = conn.cursor()
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task TEXT, due_date TEXT, category TEXT, priority TEXT, done INTEGER DEFAULT 0
+    )
 """)
 conn.commit()
 
-# -----------------------------
-# ML Model (optional use)
-# -----------------------------
-CATEGORIES = {"assignment": 0, "work": 1, "event": 2, "other": 3}
-X_train = [[2,0],[6,0],[12,0],[48,1],[72,1],[2,2],[80,2],[3,3],[100,3]]
-y_train = [1,1,1,0,0,1,0,1,0]
-clf = DecisionTreeClassifier(max_depth=3)
-clf.fit(X_train, y_train)
-
-# -----------------------------
-# Keyword-based Date Extraction
-# -----------------------------
-DATE_KEYWORDS = ["today", "tomorrow", "next", "by", "on", "at", "before", "due"]
-
-def extract_reminder(text):
-    words = text.split()
-    date_words = []
-    task_words = []
-    for w in words:
-        lw = w.lower().strip('.,!?')
-        if lw in DATE_KEYWORDS:
-            date_words.append(lw)
-        else:
-            task_words.append(w)
-    task = ' '.join(task_words) or text
-
-    due_date = None
-    date_str = ' '.join(date_words)
-    if date_str:
-        try:
-            due_date = dateparser.parse(date_str, default=datetime.now())
-        except:
-            pass
-
-    return task, due_date
-
-# -----------------------------
-# Predict Priority
-# -----------------------------
-
-def predict_priority(due_date, category):
-    if due_date is None:
-        return "Optional"
-    hours = (due_date - datetime.now()).total_seconds()/3600
-    cat_id = CATEGORIES.get(category, 3)
-    result = clf.predict([[hours, cat_id]])[0]
-    return "Critical" if result == 1 else "Optional"
-
-# -----------------------------
-# Add Reminder
-# -----------------------------
 def add_reminder(task, due_date, category, priority):
-    due_str = due_date.strftime("%Y-%m-%d %H:%M") if due_date else "No date"
-    cursor.execute("INSERT INTO reminders (task, due_date, category, priority) VALUES (?,?,?,?)",
-                   (task, due_str, category, priority))
+    due_str = due_date.strftime("%Y-%m-%d %H:%M") if due_date else "—"
+    cur.execute("INSERT INTO reminders (task,due_date,category,priority) VALUES (?,?,?,?)",
+                (task, due_str, category, priority))
     conn.commit()
 
-# -----------------------------
-# Get Reminders
-# -----------------------------
 def get_reminders():
-    cursor.execute("SELECT * FROM reminders ORDER BY due_date")
-    return cursor.fetchall()
+    cur.execute("SELECT * FROM reminders ORDER BY due_date")
+    return cur.fetchall()
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.set_page_config(page_title="AI Smart Assistant", page_icon="📅", layout="wide")
-st.title("🎓 AI Smart Student Assistant")
-st.markdown("### More control. More clarity. No forced decisions.")
+# ── UI ─────────────────────────────────────────────────────
+st.set_page_config(page_title="Smart Reminders", page_icon="🗓️", layout="centered")
 
-menu = st.sidebar.radio("Navigation", [
-    "Add Reminder",
-    "View Reminders",
-    "Mark Done",
-    "Delete Reminder"
-])
+st.markdown("""
+<style>
+    .block-container { max-width: 720px; padding-top: 2rem; }
+    h1 { font-weight: 500; letter-spacing: -0.5px; }
+    .reminder-card { background: #f9f9f7; border: 1px solid #e8e8e4;
+        border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
+    .tag { display: inline-block; font-size: 11px; padding: 2px 9px;
+        border-radius: 99px; font-weight: 500; margin-right: 6px; }
+    .critical { background: #fde8e8; color: #991b1b; }
+    .optional { background: #e8f4e8; color: #166534; }
+</style>
+""", unsafe_allow_html=True)
 
-# -----------------------------
-# ADD REMINDER
-# -----------------------------
-if menu == "Add Reminder":
-    st.subheader("➕ Add New Reminder")
-    text = st.text_input("Enter your task (natural language allowed)")
+st.title("🗓️ Smart Reminder System")
+st.caption("AI-powered · NLP input · Predictive priority")
 
-    auto_extract = st.checkbox("Auto-detect date using keywords")
-    extracted_date = None
-    if auto_extract and text:
-        task_only, extracted_date = extract_reminder(text)
-        if extracted_date:
-            st.success(f"Detected date: {extracted_date}")
+tab1, tab2, tab3 = st.tabs(["Add", "View", "Manage"])
+
+# ── Tab 1: Add ─────────────────────────────────────────────
+with tab1:
+    st.markdown("#### New reminder")
+    text = st.text_input("Describe your task", placeholder="e.g. submit lab report by friday 5pm")
+
+    task, auto_date = ("", None)
+    if text:
+        task, auto_date = extract_reminder(text)
+        if auto_date:
+            st.success(f"Detected date: **{auto_date.strftime('%b %d, %Y – %H:%M')}**")
         else:
-            task_only = text
-    else:
-        task_only = text
+            st.info("No date detected in text — pick one below.")
 
     col1, col2 = st.columns(2)
     with col1:
-        manual_date = st.datetime_input("Or choose date manually", value=datetime.now())
+        manual_date = st.date_input("Date", value=datetime.today())
+        manual_time = st.time_input("Time", value=datetime.now().time())
     with col2:
         category = st.selectbox("Category", ["assignment", "work", "event", "other"])
+        priority_mode = st.radio("Priority", ["AI decides", "I'll choose"])
 
-    priority_mode = st.radio("Priority Mode", ["Auto (AI decides)", "Manual (You choose)"])
-
-    if priority_mode == "Manual (You choose)":
-        priority = st.selectbox("Select Priority", ["Critical", "Optional"])
+    if priority_mode == "I'll choose":
+        priority = st.selectbox("Set priority", ["Critical", "Optional"])
     else:
-        chosen_date = extracted_date if extracted_date else manual_date
-        priority = predict_priority(chosen_date, category)
-        st.info(f"AI Suggested Priority: {priority}")
+        final_dt = auto_date if auto_date else datetime.combine(manual_date, manual_time)
+        priority = predict_priority(final_dt, category)
+        badge = "🔴 Critical" if priority == "Critical" else "🟢 Optional"
+        st.markdown(f"AI priority: **{badge}**")
 
-    if st.button("Add Reminder"):
-        final_date = extracted_date if extracted_date else manual_date
-        add_reminder(task_only, final_date, category, priority)
-        st.success("Reminder Added Successfully!")
+    if st.button("Add reminder", use_container_width=True):
+        if not text:
+            st.warning("Please enter a task.")
+        else:
+            final_dt = auto_date if auto_date else datetime.combine(manual_date, manual_time)
+            add_reminder(task, final_dt, category, priority)
+            st.success("Reminder added!")
 
-# -----------------------------
-# VIEW REMINDERS
-# -----------------------------
-elif menu == "View Reminders":
-    st.subheader("📋 Your Reminders")
+# ── Tab 2: View ────────────────────────────────────────────
+with tab2:
     data = get_reminders()
     if not data:
-        st.warning("No reminders yet.")
+        st.info("No reminders yet. Add one in the Add tab.")
     else:
         for r in data:
-            color = "🔴" if r[4] == "Critical" else "🟢"
-            done = "✅" if r[5] else "❌"
-            st.markdown(f"""{color} **{r[1]}**  
-📅 {r[2]} | 📂 {r[3]} | {done}""")
+            icon = "🔴" if r[4] == "Critical" else "🟢"
+            done = "✅" if r[5] else ""
+            tag_class = "critical" if r[4] == "Critical" else "optional"
+            st.markdown(f"""
+            <div class="reminder-card">
+                <strong>{done} {r[1]}</strong><br>
+                <span style="color:#888;font-size:13px">📅 {r[2]} &nbsp;·&nbsp; {r[3]}</span>
+                &nbsp; <span class="tag {tag_class}">{icon} {r[4]}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-# -----------------------------
-# MARK DONE
-# -----------------------------
-elif menu == "Mark Done":
-    st.subheader("✔ Mark Reminder as Done")
+# ── Tab 3: Manage ──────────────────────────────────────────
+with tab3:
     data = get_reminders()
-    ids = [r[0] for r in data]
-    if ids:
-        selected = st.selectbox("Select ID", ids)
-        if st.button("Mark Done"):
-            cursor.execute("UPDATE reminders SET done=1 WHERE id=?", (selected,))
-            conn.commit()
-            st.success("Marked as done")
-
-# -----------------------------
-# DELETE
-# -----------------------------
-elif menu == "Delete Reminder":
-    st.subheader("🗑 Delete Reminder")
-    data = get_reminders()
-    ids = [r[0] for r in data]
-    if ids:
-        selected = st.selectbox("Select ID", ids)
-        if st.button("Delete"):
-            cursor.execute("DELETE FROM reminders WHERE id=?", (selected,))
-            conn.commit()
-            st.success("Deleted successfully")
+    if not data:
+        st.info("Nothing to manage yet.")
+    else:
+        options = {f"[{r[0]}] {r[1]}": r[0] for r in data}
+        selected = st.selectbox("Select reminder", list(options.keys()))
+        rid = options[selected]
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Mark done", use_container_width=True):
+                cur.execute("UPDATE reminders SET done=1 WHERE id=?", (rid,))
+                conn.commit()
+                st.success("Marked as done!")
+        with col2:
+            if st.button("🗑️ Delete", use_container_width=True):
+                cur.execute("DELETE FROM reminders WHERE id=?", (rid,))
+                conn.commit()
+                st.success("Deleted.")
