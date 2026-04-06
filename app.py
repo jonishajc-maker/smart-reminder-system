@@ -1,6 +1,6 @@
 # -----------------------------
-# SMART REMINDER SYSTEM (FINAL VERSION)
-# Streamlit UI + User Control + spaCy Fix + F-string fix
+# SMART REMINDER SYSTEM (FINAL ROBUST VERSION)
+# Streamlit UI + User Control + Robust spaCy Load + F-string fix
 # -----------------------------
 
 import streamlit as st
@@ -13,13 +13,16 @@ import subprocess
 import sys
 
 # -----------------------------
-# Load NLP with runtime download fix
+# Robust spaCy Load Function
 # -----------------------------
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
+def load_spacy_model(model_name="en_core_web_sm"):
+    try:
+        return spacy.load(model_name)
+    except OSError:
+        subprocess.check_call([sys.executable, "-m", "spacy", "download", model_name])
+        return spacy.load(model_name)
+
+nlp = load_spacy_model()
 
 # -----------------------------
 # Database
@@ -64,7 +67,7 @@ def extract_reminder(text):
     return text, due_date
 
 # -----------------------------
-# Predict Priority (optional)
+# Predict Priority
 # -----------------------------
 def predict_priority(due_date, category):
     if due_date is None:
