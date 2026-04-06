@@ -1,8 +1,22 @@
+import subprocess
+import sys
 import streamlit as st
 import sqlite3
 from datetime import datetime
 from dateutil import parser as dateparser
 from sklearn.tree import DecisionTreeClassifier
+import spacy
+
+# ── NLP model ──────────────────────────────────────────────
+@st.cache_resource
+def load_nlp():
+    try:
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+        return spacy.load("en_core_web_sm")
+
+nlp = load_nlp()
 
 # ── ML priority model ──────────────────────────────────────
 CATEGORIES = {"assignment": 0, "work": 1, "event": 2, "other": 3}
@@ -18,31 +32,20 @@ def predict_priority(due_date, category):
     cat_id = CATEGORIES.get(category, 3)
     return "Critical" if clf.predict([[hours, cat_id]])[0] == 1 else "Optional"
 
-# ── Date extraction (keyword-based) ────────────────────────
-DATE_TRIGGERS = ["by", "on", "at", "before", "due", "today", "tomorrow", "next", "monday",
-                 "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-
+# ── NLP date + task extraction ─────────────────────────────
 def extract_reminder(text):
-    words = text.split()
-    date_tokens = []
-    task_tokens = []
-    i = 0
-    while i < len(words):
-        w = words[i].lower().strip(".,!?")
-        if w in DATE_TRIGGERS:
-            date_tokens += words[i:]
-            break
-        else:
-            task_tokens.append(words[i])
-        i += 1
-    task = " ".join(task_tokens) or text
+    doc = nlp(text)
+    date_ents = [e.text for e in doc.ents if e.label_ in ("DATE", "TIME")]
+    task = text
+    for ent in date_ents:
+        task = task.replace(ent, "").strip(" ,")
     due = None
-    if date_tokens:
+    if date_ents:
         try:
-            due = dateparser.parse(" ".join(date_tokens), default=datetime.now())
+            due = dateparser.parse(" ".join(date_ents), default=datetime.now())
         except:
             pass
-    return task, due
+    return task or text, due
 
 # ── Database ───────────────────────────────────────────────
 conn = sqlite3.connect("reminders.db", check_same_thread=False)
@@ -91,7 +94,7 @@ with tab1:
     st.markdown("#### New reminder")
     text = st.text_input("Describe your task", placeholder="e.g. submit lab report by friday 5pm")
 
-    task, auto_date = "", None
+    task, auto_date = ("", None)
     if text:
         task, auto_date = extract_reminder(text)
         if auto_date:
@@ -122,7 +125,6 @@ with tab1:
             final_dt = auto_date if auto_date else datetime.combine(manual_date, manual_time)
             add_reminder(task, final_dt, category, priority)
             st.success("Reminder added!")
-            st.rerun()
 
 # ── Tab 2: View ────────────────────────────────────────────
 with tab2:
@@ -132,13 +134,13 @@ with tab2:
     else:
         for r in data:
             icon = "🔴" if r[4] == "Critical" else "🟢"
-            done = "✅ " if r[5] else ""
+            done = "✅" if r[5] else ""
             tag_class = "critical" if r[4] == "Critical" else "optional"
             st.markdown(f"""
             <div class="reminder-card">
-                <strong>{done}{r[1]}</strong><br>
+                <strong>{done} {r[1]}</strong><br>
                 <span style="color:#888;font-size:13px">📅 {r[2]} &nbsp;·&nbsp; {r[3]}</span>
-                &nbsp;<span class="tag {tag_class}">{icon} {r[4]}</span>
+                &nbsp; <span class="tag {tag_class}">{icon} {r[4]}</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -157,10 +159,8 @@ with tab3:
                 cur.execute("UPDATE reminders SET done=1 WHERE id=?", (rid,))
                 conn.commit()
                 st.success("Marked as done!")
-                st.rerun()
         with col2:
             if st.button("🗑️ Delete", use_container_width=True):
                 cur.execute("DELETE FROM reminders WHERE id=?", (rid,))
                 conn.commit()
                 st.success("Deleted.")
-                st.rerun()
