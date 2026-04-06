@@ -1,19 +1,25 @@
 # -----------------------------
-# SMART REMINDER SYSTEM (IMPROVED)
-# Streamlit UI + User Control
+# SMART REMINDER SYSTEM (FINAL VERSION)
+# Streamlit UI + User Control + spaCy Fix
 # -----------------------------
 
 import streamlit as st
 import sqlite3
-import spacy
 from datetime import datetime
 from dateutil import parser as dateparser
 from sklearn.tree import DecisionTreeClassifier
+import spacy
+import subprocess
+import sys
 
 # -----------------------------
-# Load NLP
+# Load NLP with runtime download fix
 # -----------------------------
-nlp = spacy.load("en_core_web_sm")
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+    nlp = spacy.load("en_core_web_sm")
 
 # -----------------------------
 # Database
@@ -37,10 +43,8 @@ conn.commit()
 # ML Model (optional use)
 # -----------------------------
 CATEGORIES = {"assignment": 0, "work": 1, "event": 2, "other": 3}
-
 X_train = [[2,0],[6,0],[12,0],[48,1],[72,1],[2,2],[80,2],[3,3],[100,3]]
 y_train = [1,1,1,0,0,1,0,1,0]
-
 clf = DecisionTreeClassifier(max_depth=3)
 clf.fit(X_train, y_train)
 
@@ -87,11 +91,10 @@ def get_reminders():
     return cursor.fetchall()
 
 # -----------------------------
-# UI START
+# Streamlit UI
 # -----------------------------
-st.set_page_config(page_title="Smart Reminder", layout="wide")
-
-st.title("📅 Smart Reminder System")
+st.set_page_config(page_title="AI Smart Assistant", page_icon="📅", layout="wide")
+st.title("🎓 AI Smart Student Assistant")
 st.markdown("### More control. More clarity. No forced decisions.")
 
 menu = st.sidebar.radio("Navigation", [
@@ -106,11 +109,9 @@ menu = st.sidebar.radio("Navigation", [
 # -----------------------------
 if menu == "Add Reminder":
     st.subheader("➕ Add New Reminder")
-
     text = st.text_input("Enter your task (natural language allowed)")
 
     auto_extract = st.checkbox("Auto-detect date using AI")
-
     extracted_date = None
     if auto_extract and text:
         _, extracted_date = extract_reminder(text)
@@ -118,17 +119,12 @@ if menu == "Add Reminder":
             st.success(f"Detected date: {extracted_date}")
 
     col1, col2 = st.columns(2)
-
     with col1:
         manual_date = st.datetime_input("Or choose date manually", value=datetime.now())
-
     with col2:
         category = st.selectbox("Category", ["assignment", "work", "event", "other"])
 
-    priority_mode = st.radio("Priority Mode", [
-        "Auto (AI decides)",
-        "Manual (You choose)"
-    ])
+    priority_mode = st.radio("Priority Mode", ["Auto (AI decides)", "Manual (You choose)"])
 
     if priority_mode == "Manual (You choose)":
         priority = st.selectbox("Select Priority", ["Critical", "Optional"])
@@ -147,31 +143,23 @@ if menu == "Add Reminder":
 # -----------------------------
 elif menu == "View Reminders":
     st.subheader("📋 Your Reminders")
-
     data = get_reminders()
-
     if not data:
         st.warning("No reminders yet.")
     else:
         for r in data:
             color = "🔴" if r[4] == "Critical" else "🟢"
             done = "✅" if r[5] else "❌"
-
-            st.markdown(f"""
-            {color} **{r[1]}**  
-            📅 {r[2]} | 📂 {r[3]} | {done}
-            ---
-            """)
+            st.markdown(f"{color} **{r[1]}**  
+📅 {r[2]} | 📂 {r[3]} | {done}")
 
 # -----------------------------
 # MARK DONE
 # -----------------------------
 elif menu == "Mark Done":
     st.subheader("✔ Mark Reminder as Done")
-
     data = get_reminders()
     ids = [r[0] for r in data]
-
     if ids:
         selected = st.selectbox("Select ID", ids)
         if st.button("Mark Done"):
@@ -184,10 +172,8 @@ elif menu == "Mark Done":
 # -----------------------------
 elif menu == "Delete Reminder":
     st.subheader("🗑 Delete Reminder")
-
     data = get_reminders()
     ids = [r[0] for r in data]
-
     if ids:
         selected = st.selectbox("Select ID", ids)
         if st.button("Delete"):
