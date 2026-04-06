@@ -1,28 +1,13 @@
 # -----------------------------
-# SMART REMINDER SYSTEM (FINAL ROBUST VERSION)
-# Streamlit UI + User Control + Robust spaCy Load + F-string fix
+# SMART REMINDER SYSTEM (FINAL VERSION WITHOUT spaCy)
+# Streamlit UI + User Control + Keyword-based Date Parsing
 # -----------------------------
 
 import streamlit as st
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import parser as dateparser
 from sklearn.tree import DecisionTreeClassifier
-import spacy
-import subprocess
-import sys
-
-# -----------------------------
-# Robust spaCy Load Function
-# -----------------------------
-def load_spacy_model(model_name="en_core_web_sm"):
-    try:
-        return spacy.load(model_name)
-    except OSError:
-        subprocess.check_call([sys.executable, "-m", "spacy", "download", model_name])
-        return spacy.load(model_name)
-
-nlp = load_spacy_model()
 
 # -----------------------------
 # Database
@@ -52,23 +37,36 @@ clf = DecisionTreeClassifier(max_depth=3)
 clf.fit(X_train, y_train)
 
 # -----------------------------
-# Extract Task + Date
+# Keyword-based Date Extraction
 # -----------------------------
+DATE_KEYWORDS = ["today", "tomorrow", "next", "by", "on", "at", "before", "due"]
+
 def extract_reminder(text):
-    doc = nlp(text)
+    words = text.split()
+    date_words = []
+    task_words = []
+    for w in words:
+        lw = w.lower().strip('.,!?')
+        if lw in DATE_KEYWORDS:
+            date_words.append(lw)
+        else:
+            task_words.append(w)
+    task = ' '.join(task_words) or text
+
     due_date = None
-    for ent in doc.ents:
-        if ent.label_ in ["DATE", "TIME"]:
-            try:
-                due_date = dateparser.parse(ent.text)
-                break
-            except:
-                pass
-    return text, due_date
+    date_str = ' '.join(date_words)
+    if date_str:
+        try:
+            due_date = dateparser.parse(date_str, default=datetime.now())
+        except:
+            pass
+
+    return task, due_date
 
 # -----------------------------
 # Predict Priority
 # -----------------------------
+
 def predict_priority(due_date, category):
     if due_date is None:
         return "Optional"
@@ -114,12 +112,16 @@ if menu == "Add Reminder":
     st.subheader("➕ Add New Reminder")
     text = st.text_input("Enter your task (natural language allowed)")
 
-    auto_extract = st.checkbox("Auto-detect date using AI")
+    auto_extract = st.checkbox("Auto-detect date using keywords")
     extracted_date = None
     if auto_extract and text:
-        _, extracted_date = extract_reminder(text)
+        task_only, extracted_date = extract_reminder(text)
         if extracted_date:
             st.success(f"Detected date: {extracted_date}")
+        else:
+            task_only = text
+    else:
+        task_only = text
 
     col1, col2 = st.columns(2)
     with col1:
@@ -138,7 +140,7 @@ if menu == "Add Reminder":
 
     if st.button("Add Reminder"):
         final_date = extracted_date if extracted_date else manual_date
-        add_reminder(text, final_date, category, priority)
+        add_reminder(task_only, final_date, category, priority)
         st.success("Reminder Added Successfully!")
 
 # -----------------------------
