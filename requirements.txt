@@ -1,0 +1,4 @@
+streamlit
+spacy
+python-dateutil
+scikit-learn
