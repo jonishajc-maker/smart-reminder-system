@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import streamlit as st
 import sqlite3
 from datetime import datetime
@@ -8,7 +10,11 @@ import spacy
 # ── NLP model ──────────────────────────────────────────────
 @st.cache_resource
 def load_nlp():
-    return spacy.load("en_core_web_sm")
+    try:
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+        return spacy.load("en_core_web_sm")
 
 nlp = load_nlp()
 
