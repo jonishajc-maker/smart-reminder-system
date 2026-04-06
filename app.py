@@ -1,6 +1,6 @@
 # -----------------------------
 # SMART REMINDER SYSTEM (FINAL VERSION)
-# Streamlit UI + User Control + spaCy Fix
+# Streamlit UI + User Control + spaCy Fix + F-string fix
 # -----------------------------
 
 import streamlit as st
@@ -150,8 +150,8 @@ elif menu == "View Reminders":
         for r in data:
             color = "🔴" if r[4] == "Critical" else "🟢"
             done = "✅" if r[5] else "❌"
-            st.markdown(f"{color} **{r[1]}**  
-📅 {r[2]} | 📂 {r[3]} | {done}")
+            st.markdown(f"""{color} **{r[1]}**  
+📅 {r[2]} | 📂 {r[3]} | {done}""")
 
 # -----------------------------
 # MARK DONE
